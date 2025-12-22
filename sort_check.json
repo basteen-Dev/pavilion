@@ -1,0 +1,41 @@
+{
+  "banners": [
+    {
+      "id": "45cd59c3-86d9-4588-963d-1d0950976920",
+      "title": "Cricket",
+      "created_at": "2025-12-22T08:53:00.080Z"
+    },
+    {
+      "id": "378272af-131d-4794-9beb-48411f4a73cf",
+      "title": "OFFER",
+      "created_at": "2025-12-22T09:25:02.764Z"
+    }
+  ],
+  "collections": [
+    {
+      "id": "928b5b4e-3309-4636-a77f-2d8e7f66cb88",
+      "name": "TEAM SPORTS",
+      "created_at": "2025-12-21T13:21:41.210Z"
+    },
+    {
+      "id": "5be08f8d-5aaf-4d81-b98a-47f5c1f04e57",
+      "name": "INDIVIDUAL GAMES",
+      "created_at": "2025-12-21T13:36:51.773Z"
+    },
+    {
+      "id": "b8232fa7-23af-47a4-ab6e-c7002b78ffa4",
+      "name": "FITNESS & TRAINING EQUIPMENTS",
+      "created_at": "2025-12-21T13:37:43.988Z"
+    },
+    {
+      "id": "33c378b2-7ec7-43f0-8bfc-45c2180ebf99",
+      "name": "INDOOR GAMES",
+      "created_at": "2025-12-21T13:38:55.590Z"
+    },
+    {
+      "id": "e5fa49f9-ac90-44f5-a475-e127cb77d5f0",
+      "name": "SHOES & CLOTHING",
+      "created_at": "2025-12-22T05:46:13.205Z"
+    }
+  ]
+}

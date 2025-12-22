@@ -1,0 +1,478 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { useForm, useFieldArray } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { apiCall } from '@/lib/api-client'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Card, CardContent } from '@/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
+import { ImageUploader } from '@/components/ui/image-uploader'
+import { toast } from 'sonner'
+import { X, Plus, Loader2, Printer, QrCode } from 'lucide-react'
+import QRCode from 'qrcode'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+
+// Validation Schema
+const productSchema = z.object({
+    name: z.string().min(3, 'Name is required'),
+    sku: z.string().min(2, 'SKU is required'),
+    mrp_price: z.coerce.number().min(0, 'Price must be positive'),
+    selling_price: z.coerce.number().min(0, 'Price must be positive'), // Added selling_price
+    dealer_price: z.coerce.number().min(0).optional(),
+    category_id: z.string().min(1, 'Category is required'),
+    sub_category_id: z.string().optional(),
+    brand_id: z.string().optional(),
+    short_description: z.string().optional(),
+    description: z.string().optional(),
+    a_plus_content: z.string().optional(), // Added A+ Content
+    buy_url: z.string().url().optional().or(z.literal('')), // Added Buy URL
+    tax_class: z.string().min(1, 'Tax Class is required'), // Added Tax Class
+    hsn_code: z.string().optional(), // Added HSN Code
+    is_featured: z.boolean().default(false),
+    is_active: z.boolean().default(true),
+    is_discontinued: z.boolean().default(false), // Added Discontinued
+    is_quote_hidden: z.boolean().default(false), // Added No Quote
+    images: z.array(z.string()).default([]),
+    videos: z.array(z.string()).default([]),
+    variants: z.array(z.object({
+        size: z.string(),
+        color: z.string(),
+        price: z.coerce.number(),
+        stock: z.coerce.number()
+    })).default([])
+})
+
+export function ProductForm({ product, onCancel, onSuccess }) {
+    const queryClient = useQueryClient()
+    const [newVideoUrl, setNewVideoUrl] = useState('')
+    const [qrCodeUrl, setQrCodeUrl] = useState('')
+
+    const form = useForm({
+        resolver: zodResolver(productSchema),
+        defaultValues: {
+            name: product?.name || '',
+            sku: product?.sku || '',
+            mrp_price: product?.mrp_price || 0,
+            selling_price: product?.selling_price || product?.mrp_price || 0, // Default to MRP if not set
+            dealer_price: product?.dealer_price || 0,
+            category_id: product?.category_id?.toString() || '',
+            sub_category_id: product?.sub_category_id?.toString() || '',
+            brand_id: product?.brand_id?.toString() || '',
+            short_description: product?.short_description || '',
+            description: product?.description || '',
+            a_plus_content: product?.a_plus_content || '',
+            buy_url: product?.buy_url || '',
+            tax_class: product?.tax_class || 'Standard',
+            hsn_code: product?.hsn_code || '',
+            is_featured: product?.is_featured || false,
+            is_active: product?.is_active ?? true,
+            is_discontinued: product?.is_discontinued || false,
+            is_quote_hidden: product?.is_quote_hidden || false,
+            images: safeJSONParse(product?.images),
+            videos: safeJSONParse(product?.videos),
+            variants: safeJSONParse(product?.variants)
+        }
+    })
+
+    function safeJSONParse(value) {
+        if (!value) return []
+        if (Array.isArray(value)) return value
+        if (typeof value === 'object') return [value] // Should be array but if single obj
+        try {
+            return JSON.parse(value)
+        } catch (e) {
+            console.error('JSON Parse error', e)
+            return []
+        }
+    }
+
+    // Destructure form methods
+    const { register, handleSubmit, watch, setValue, control, formState: { errors } } = form
+    const { fields: variants, append: appendVariant, remove: removeVariant } = useFieldArray({
+        control,
+        name: "variants"
+    })
+
+    const selectedCategoryId = watch('category_id')
+    const selectedSubCategoryId = watch('sub_category_id')
+
+    // Watch Images for Uploader
+    const currentImages = watch('images')
+
+    // Queries
+    const { data: categories = [] } = useQuery({
+        queryKey: ['categories'],
+        queryFn: () => apiCall('/categories')
+    })
+
+    const { data: subCategories = [] } = useQuery({
+        queryKey: ['sub-categories', selectedCategoryId],
+        queryFn: () => apiCall(`/sub-categories?categoryId=${selectedCategoryId}`),
+        enabled: !!selectedCategoryId
+    })
+
+    // Cascading Brand Query - Fetch ONLY brands for this sub-category
+    const { data: brands = [], isLoading: isLoadingBrands } = useQuery({
+        queryKey: ['brands', selectedSubCategoryId],
+        queryFn: () => apiCall(`/brands?sub_category_id=${selectedSubCategoryId}`),
+        enabled: !!selectedSubCategoryId
+    })
+
+    // Reset SubCategory when Category changes (if user interacts manually)
+    // Note: We need to be careful not to reset on initial load if editing
+    // We can use a custom change handler for the Select instead of useEffect to avoid loops
+
+    const { isPending, mutate } = useMutation({
+        mutationFn: (data) => {
+            const url = product ? `/products/${product.id}` : '/products'
+            const method = product ? 'PUT' : 'POST'
+            if (data.sub_category_id === '') delete data.sub_category_id
+            if (data.brand_id === '') delete data.brand_id
+            if (product) data.id = product.id
+
+            return apiCall(url, { method, body: JSON.stringify(data) })
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries(['products'])
+            toast.success(product ? 'Product updated' : 'Product created')
+            onSuccess()
+        },
+        onError: (err) => {
+            toast.error(err.message)
+        }
+    })
+
+    const handleAddVideo = () => {
+        if (newVideoUrl) {
+            const currentVideos = watch('videos')
+            setValue('videos', [...currentVideos, newVideoUrl])
+            setNewVideoUrl('')
+        }
+    }
+
+    const removeVideo = (index) => {
+        const currentVideos = watch('videos')
+        setValue('videos', currentVideos.filter((_, i) => i !== index))
+    }
+
+    const onSubmit = (data) => {
+        mutate(data)
+    }
+
+
+
+    const generateQRCode = async () => {
+        try {
+            const url = await QRCode.toDataURL(JSON.stringify({
+                id: product?.id,
+                sku: watch('sku'),
+                name: watch('name'),
+                price: watch('selling_price')
+            }))
+            // Create a temporary window to print
+            const printWindow = window.open('', '', 'width=600,height=600')
+            printWindow.document.write(`
+                <html>
+                    <head><title>Print QR Code</title></head>
+                    <body style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;font-family:sans-serif;">
+                        <h2>${watch('name')}</h2>
+                        <p>SKU: ${watch('sku')}</p>
+                        <img src="${url}" style="width:300px;height:300px;" />
+                        <p>Price: ₹${watch('selling_price')}</p>
+                        <script>
+                            window.onload = function() { window.print(); window.close(); }
+                        </script>
+                    </body>
+                </html>
+            `)
+            printWindow.document.close()
+        } catch (err) {
+            console.error(err)
+            toast.error('Failed to generate QR Code')
+        }
+    }
+
+    return (
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-8 pb-10">
+            <div className="flex justify-between items-center bg-gray-50 p-4 rounded-lg sticky top-0 z-10 border-b">
+                <div>
+                    <h2 className="text-xl font-bold">{product ? 'Edit Product' : 'Create New Product'}</h2>
+                    <p className="text-sm text-gray-500">Manage your product information</p>
+                </div>
+                <div className="flex gap-2">
+                    <Button type="button" variant="outline" onClick={generateQRCode} disabled={!watch('sku') || !watch('name')}>
+                        <QrCode className="w-4 h-4 mr-2" />
+                        Print Label
+                    </Button>
+                    <Button type="button" variant="outline" onClick={onCancel}>Cancel</Button>
+                    <Button type="submit" className="bg-red-600" disabled={isPending}>
+                        {isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                        Save Product
+                    </Button>
+                </div>
+            </div>
+
+            <Tabs defaultValue="general" className="w-full">
+                <TabsList className="grid w-full grid-cols-4 lg:w-[600px] mb-6">
+                    <TabsTrigger value="general">General</TabsTrigger>
+                    <TabsTrigger value="organization">Organization</TabsTrigger>
+                    <TabsTrigger value="pricing">Pricing & Variants</TabsTrigger>
+                    <TabsTrigger value="media">Media</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="general">
+                    <Card>
+                        <CardContent className="pt-6 space-y-6">
+                            <div className="flex flex-wrap gap-6 items-center bg-blue-50 p-4 rounded-lg text-blue-800 text-sm">
+                                <div className="flex items-center gap-2">
+                                    <Switch
+                                        checked={watch('is_active')}
+                                        onCheckedChange={(checked) => setValue('is_active', checked)}
+                                    />
+                                    <span className="font-medium">Active</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Switch
+                                        checked={watch('is_featured')}
+                                        onCheckedChange={(checked) => setValue('is_featured', checked)}
+                                    />
+                                    <span className="font-medium">Featured</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Switch
+                                        checked={watch('is_discontinued')}
+                                        onCheckedChange={(checked) => setValue('is_discontinued', checked)}
+                                    />
+                                    <span className="font-medium text-red-600">Discontinued</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Switch
+                                        checked={watch('is_quote_hidden')}
+                                        onCheckedChange={(checked) => setValue('is_quote_hidden', checked)}
+                                    />
+                                    <span className="font-medium text-orange-600">No Quote</span>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Product Name *</Label>
+                                    <Input {...register('name')} />
+                                    {errors.name && <p className="text-red-500 text-xs">{errors.name.message}</p>}
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>SKU *</Label>
+                                    <Input {...register('sku')} />
+                                    {errors.sku && <p className="text-red-500 text-xs">{errors.sku.message}</p>}
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Buy URL (External)</Label>
+                                <Input {...register('buy_url')} placeholder="https://..." />
+                                {errors.buy_url && <p className="text-red-500 text-xs">{errors.buy_url.message}</p>}
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Short Description</Label>
+                                <Input {...register('short_description')} placeholder="Brief overview for cards..." />
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Full Description</Label>
+                                <Textarea {...register('description')} className="min-h-[150px]" placeholder="Detailed product specifications..." />
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>A+ Content (Extra Info)</Label>
+                                <Textarea {...register('a_plus_content')} className="min-h-[150px]" placeholder="Rich content, HTML or Markdown..." />
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                <TabsContent value="organization">
+                    <Card>
+                        <CardContent className="pt-6 space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label>Tax Class *</Label>
+                                    <Input {...register('tax_class')} placeholder="e.g. GST 18%" />
+                                    {errors.tax_class && <p className="text-xs text-red-500">{errors.tax_class.message}</p>}
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>HSN Code</Label>
+                                    <Input {...register('hsn_code')} />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Category *</Label>
+                                <Select
+                                    value={selectedCategoryId}
+                                    onValueChange={(val) => {
+                                        setValue('category_id', val)
+                                        setValue('sub_category_id', '') // Reset sub-cat
+                                        setValue('brand_id', '') // Reset brand
+                                    }}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select Category" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {categories.map(c => (
+                                            <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                                {errors.category_id && <p className="text-xs text-red-500">{errors.category_id.message}</p>}
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Sub-Category</Label>
+                                <Select
+                                    value={selectedSubCategoryId}
+                                    onValueChange={(val) => {
+                                        setValue('sub_category_id', val)
+                                        setValue('brand_id', '') // Reset brand
+                                    }}
+                                    disabled={!selectedCategoryId}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select Sub-Category" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {subCategories.map(c => (
+                                            <SelectItem key={c.id} value={c.id.toString()}>{c.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Brand</Label>
+                                <Select
+                                    value={watch('brand_id')}
+                                    onValueChange={(val) => setValue('brand_id', val)}
+                                    disabled={!selectedSubCategoryId}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder={!selectedSubCategoryId ? "Select Sub-Category first" : "Select Brand"} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {brands.map(b => (
+                                            <SelectItem key={b.id} value={b.id.toString()}>{b.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                <TabsContent value="pricing">
+                    <Card className="mb-6">
+                        <CardContent className="pt-6">
+                            <h3 className="font-semibold mb-4">Base Pricing</h3>
+                            <div className="grid grid-cols-3 gap-4">
+                                <div className="space-y-2">
+                                    <Label>MRP (Base Price) *</Label>
+                                    <Input type="number" {...register('mrp_price')} />
+                                    {errors.mrp_price && <p className="text-red-500 text-xs">{errors.mrp_price.message}</p>}
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Selling Price *</Label>
+                                    <Input type="number" {...register('selling_price')} />
+                                    {errors.selling_price && <p className="text-red-500 text-xs">{errors.selling_price.message}</p>}
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Dealer Price (Optional)</Label>
+                                    <Input type="number" {...register('dealer_price')} />
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardContent className="pt-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <h3 className="font-semibold">Variants</h3>
+                                    <p className="text-sm text-gray-500">Manage sizes and colors if applicable</p>
+                                </div>
+                                <Button type="button" size="sm" variant="outline" onClick={() => appendVariant({ size: '', color: '', price: 0, stock: 0 })}>
+                                    <Plus className="w-4 h-4 mr-2" />
+                                    Add Variant
+                                </Button>
+                            </div>
+
+                            <div className="space-y-3">
+                                {variants.length === 0 && (
+                                    <div className="text-center py-8 bg-gray-50 rounded border border-dashed">
+                                        <p className="text-gray-500 text-sm">No variants added. Product will look like a single item.</p>
+                                    </div>
+                                )}
+                                {variants.map((field, index) => (
+                                    <div key={field.id} className="flex gap-2 items-center bg-gray-50 p-3 rounded border">
+                                        <div className="flex-1 grid grid-cols-4 gap-2">
+                                            <Input placeholder="Size" {...register(`variants.${index}.size`)} />
+                                            <Input placeholder="Color" {...register(`variants.${index}.color`)} />
+                                            <Input type="number" placeholder="Price override" {...register(`variants.${index}.price`)} />
+                                            <Input type="number" placeholder="Stock Qty" {...register(`variants.${index}.stock`)} />
+                                        </div>
+                                        <Button type="button" size="icon" variant="ghost" onClick={() => removeVariant(index)}>
+                                            <X className="w-4 h-4 text-red-500" />
+                                        </Button>
+                                    </div>
+                                ))}
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                <TabsContent value="media">
+                    <Card>
+                        <CardContent className="pt-6 space-y-8">
+                            <div>
+                                <h3 className="font-semibold mb-2">Images</h3>
+                                <p className="text-sm text-gray-500 mb-4">First image will be the main product image.</p>
+                                <ImageUploader
+                                    value={currentImages}
+                                    onChange={(newImages) => setValue('images', newImages)}
+                                    maxFiles={5}
+                                />
+                            </div>
+
+                            <div className="border-t pt-6">
+                                <h3 className="font-semibold mb-2">Videos</h3>
+                                <div className="flex gap-2 mb-2">
+                                    <Input
+                                        value={newVideoUrl}
+                                        onChange={(e) => setNewVideoUrl(e.target.value)}
+                                        placeholder="Enter YouTube/Video URL..."
+                                    />
+                                    <Button type="button" onClick={handleAddVideo} variant="secondary">Add</Button>
+                                </div>
+                                <ul className="list-disc pl-5 mt-2 space-y-1">
+                                    {watch('videos').map((url, idx) => (
+                                        <li key={idx} className="flex items-center gap-2 text-sm text-gray-600">
+                                            <span className="truncate flex-1">{url}</span>
+                                            <button type="button" onClick={() => removeVideo(idx)} className="text-red-500 hover:underline">Remove</button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+            </Tabs>
+        </form>
+    )
+}

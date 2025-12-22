@@ -1,0 +1,106 @@
+{
+  "banners": [
+    {
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "column_name": "display_order",
+      "data_type": "integer"
+    },
+    {
+      "column_name": "is_active",
+      "data_type": "boolean"
+    },
+    {
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "title",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "desktop_image_url",
+      "data_type": "text"
+    },
+    {
+      "column_name": "mobile_image_url",
+      "data_type": "text"
+    },
+    {
+      "column_name": "link",
+      "data_type": "text"
+    }
+  ],
+  "blogs": [
+    {
+      "column_name": "tags",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "author_id",
+      "data_type": "uuid"
+    },
+    {
+      "column_name": "is_published",
+      "data_type": "boolean"
+    },
+    {
+      "column_name": "published_at",
+      "data_type": "timestamp without time zone"
+    },
+    {
+      "column_name": "created_at",
+      "data_type": "timestamp without time zone"
+    },
+    {
+      "column_name": "updated_at",
+      "data_type": "timestamp without time zone"
+    },
+    {
+      "column_name": "is_active",
+      "data_type": "boolean"
+    },
+    {
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "column_name": "image_url",
+      "data_type": "text"
+    },
+    {
+      "column_name": "title",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "slug",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "excerpt",
+      "data_type": "text"
+    },
+    {
+      "column_name": "content",
+      "data_type": "text"
+    },
+    {
+      "column_name": "featured_image",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "meta_title",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "meta_description",
+      "data_type": "text"
+    }
+  ]
+}

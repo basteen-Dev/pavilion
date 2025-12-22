@@ -1,0 +1,3 @@
+Product Name *,SKU *,MRP Price *,Dealer Price,Selling Price,Category *,Sub-Category,Brand *,Description,Short Description,HSN Code,Tax Class,Buy URL,Is Featured,Is Active
+Premium Cricket Bat,CRIC-BAT-001,1500,1100,1300,Cricket,Bats,MRF,"Full grain leather handle, grade A willow...",Professional Grade Bat,9506,GST 12%,https://pavilion.com/bat,false,true
+Professional Cricket Ball,CRIC-BALL-002,500,350,450,Cricket,Balls,Kookaburra,Hand-stitched leather ball,Test Grade Ball,9506,GST 12%,https://pavilion.com/ball,true,true
