@@ -261,13 +261,13 @@ export default function GalleryManagement() {
                                 placeholder="https://..."
                             />
                             <div className="relative">
-                                input
-                                type="file"
-                                multiple
-                                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                                onChange={handleItemUpload}
-                                accept={newItemType === 'image' ? "image/*" : "video/*"}
-                                disabled={isUploading}
+                                <input
+                                    type="file"
+                                    multiple
+                                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                    onChange={handleItemUpload}
+                                    accept={newItemType === 'image' ? "image/*" : "video/*"}
+                                    disabled={isUploading}
                                 />
                                 <Button variant="secondary" disabled={isUploading}>
                                     <Upload className="w-4 h-4 mr-2" /> Upload Multiple
