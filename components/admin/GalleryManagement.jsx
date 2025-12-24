@@ -139,7 +139,14 @@ export default function GalleryManagement() {
         uploadData.append('file', file)
 
         try {
-            const res = await fetch('/api/upload', { method: 'POST', body: uploadData })
+            const token = localStorage.getItem('token')
+            const res = await fetch('/api/upload', {
+                method: 'POST',
+                headers: {
+                    ...(token && { 'Authorization': `Bearer ${token}` })
+                },
+                body: uploadData
+            })
             const data = await res.json()
             if (data.url) {
                 setFormData({ ...formData, cover_image: data.url })
@@ -167,7 +174,14 @@ export default function GalleryManagement() {
             uploadData.append('file', file)
 
             try {
-                const res = await fetch('/api/upload', { method: 'POST', body: uploadData })
+                const token = localStorage.getItem('token')
+                const res = await fetch('/api/upload', {
+                    method: 'POST',
+                    headers: {
+                        ...(token && { 'Authorization': `Bearer ${token}` })
+                    },
+                    body: uploadData
+                })
                 const data = await res.json()
                 if (data.url) {
                     await addItemToAlbumWithUrl(data.url)

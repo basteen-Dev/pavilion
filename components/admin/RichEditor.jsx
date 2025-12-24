@@ -30,16 +30,22 @@ export default function RichEditor({ value, onChange, className }) {
             formData.append('file', file);
 
             try {
+                const token = localStorage.getItem('token');
                 const res = await fetch('/api/upload', {
                     method: 'POST',
+                    headers: {
+                        ...(token && { 'Authorization': `Bearer ${token}` })
+                    },
                     body: formData,
                 });
                 const data = await res.json();
 
                 if (data.url) {
                     const quill = quillRef.current.getEditor();
-                    const range = quill.getSelection();
-                    quill.insertEmbed(range.index, 'image', data.url);
+                    const range = quill.getSelection(true); // true forces focus if possible
+                    const index = range ? range.index : quill.getLength();
+                    quill.insertEmbed(index, 'image', data.url);
+                    quill.setSelection(index + 1);
                 }
             } catch (error) {
                 console.error('Image upload failed', error);

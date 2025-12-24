@@ -101,8 +101,12 @@ export default function ImageUploader({ value, onChange, label = "Image URL", ma
                 formData.append('file', file)
 
                 try {
+                    const token = localStorage.getItem('token');
                     const res = await fetch('/api/upload', {
                         method: 'POST',
+                        headers: {
+                            ...(token && { 'Authorization': `Bearer ${token}` })
+                        },
                         body: formData
                     })
                     const data = await res.json()
