@@ -41,7 +41,29 @@ async function authenticateRequest(request) {
     return null;
   }
 
-  return result.rows[0];
+  const user = result.rows[0];
+
+  // Session Timeout Logic (Increased to 2 hours for better dev experience)
+  const TIMEOUT_MS = 120 * 60 * 1000;
+  if (user.last_active_at) {
+    const lastActive = new Date(user.last_active_at).getTime();
+    const now = Date.now();
+    const diff = now - lastActive;
+
+    if (diff > TIMEOUT_MS) {
+      console.log('Session expired for:', user.email, 'Age:', Math.round(diff / 60000), 'min');
+      return null; // Force 401
+    }
+  }
+
+  // Update last_active_at
+  try {
+    await query('UPDATE users SET last_active_at = CURRENT_TIMESTAMP WHERE id = $1', [user.id]);
+  } catch (err) {
+    console.error('Failed to update last_active_at:', err.message);
+  }
+
+  return user;
 }
 
 // Main route handler
@@ -544,7 +566,7 @@ async function handleRoute(request, { params }) {
         `INSERT INTO users (email, password_hash, name, phone, role_id, mfa_enabled, is_active) 
          VALUES ($1, $2, $3, $4, $5, false, true) 
          RETURNING id, email, name, phone`,
-        [email, passwordHash, name || null, phone || null, roleId]
+        [email, passwordHash, name || company_name || 'B2B User', phone || null, roleId]
       );
 
       const newUser = userResult.rows[0];
@@ -661,7 +683,7 @@ async function handleRoute(request, { params }) {
     // Dashboard stats
     if (route === '/admin/dashboard' && method === 'GET') {
       const user = await authenticateRequest(request);
-      if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+      if (!user || (user.role_name !== 'superadmin' && user.role_name !== 'admin')) {
         return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
       }
 
@@ -678,6 +700,239 @@ async function handleRoute(request, { params }) {
         customers: parseInt(customers.rows[0].count),
         pending_approvals: parseInt(pending.rows[0].count)
       }));
+    }
+    // --- ADMIN USER MANAGEMENT (SUPERADMIN ONLY) ---
+
+    // Get all users
+    if (route === '/admin/users' && method === 'GET') {
+      const user = await authenticateRequest(request);
+      if (!user || user.role_name !== 'superadmin') {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const result = await query(`
+        SELECT u.id, u.email, u.name, u.phone, u.mfa_enabled, u.is_active, r.name as role 
+        FROM users u 
+        LEFT JOIN roles r ON u.role_id = r.id 
+        ORDER BY u.created_at DESC
+      `);
+
+      return handleCORS(NextResponse.json(result.rows));
+    }
+
+    // Create user
+    if (route === '/admin/users' && method === 'POST') {
+      const currentUser = await authenticateRequest(request);
+      if (!currentUser || currentUser.role_name !== 'superadmin') {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const { email, password, name, phone, role_id } = await request.json();
+
+      if (!email || !password || !role_id) {
+        return handleCORS(NextResponse.json({ error: 'Email, password and role are required' }, { status: 400 }));
+      }
+
+      const existing = await query('SELECT id FROM users WHERE email = $1', [email]);
+      if (existing.rows.length > 0) {
+        return handleCORS(NextResponse.json({ error: 'User already exists' }, { status: 400 }));
+      }
+
+      const passwordHash = await hashPassword(password);
+      const result = await query(`
+        INSERT INTO users (email, password_hash, name, phone, role_id, is_active) 
+        VALUES ($1, $2, $3, $4, $5, true) 
+        RETURNING id, email, name, role_id
+      `, [email, passwordHash, name || null, phone || null, role_id]);
+
+      return handleCORS(NextResponse.json(result.rows[0]));
+    }
+
+    // Delete user
+    if (route.startsWith('/admin/users/') && method === 'DELETE') {
+      const currentUser = await authenticateRequest(request);
+      if (!currentUser || currentUser.role_name !== 'superadmin') {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const targetId = path[2];
+      await query('DELETE FROM users WHERE id = $1', [targetId]);
+      return handleCORS(NextResponse.json({ success: true }));
+    }
+
+    // Get all roles
+    if (route === '/admin/roles' && method === 'GET') {
+      const user = await authenticateRequest(request);
+      if (!user || user.role_name !== 'superadmin') {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const result = await query('SELECT id, name FROM roles ORDER BY name ASC');
+      return handleCORS(NextResponse.json(result.rows));
+    }
+
+    // Create a new role
+    if (route === '/admin/roles' && method === 'POST') {
+      const user = await authenticateRequest(request);
+      if (!user || user.role_name !== 'superadmin') {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const { name } = await request.json();
+      if (!name) {
+        return handleCORS(NextResponse.json({ error: 'Role name is required' }, { status: 400 }));
+      }
+
+      // Check if role already exists
+      const existing = await query('SELECT id FROM roles WHERE name = $1', [name.toLowerCase()]);
+      if (existing.rows.length > 0) {
+        return handleCORS(NextResponse.json({ error: 'Role already exists' }, { status: 400 }));
+      }
+
+      const result = await query('INSERT INTO roles (name) VALUES ($1) RETURNING *', [name.toLowerCase()]);
+      return handleCORS(NextResponse.json(result.rows[0]));
+    }
+
+    // Delete a role
+    if (route.startsWith('/admin/roles/') && method === 'DELETE') {
+      const user = await authenticateRequest(request);
+      if (!user || user.role_name !== 'superadmin') {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const roleId = path[2];
+
+      // Safety check: Don't delete roles which are currently assigned to users
+      const usersWithRole = await query('SELECT id FROM users WHERE role_id = $1 LIMIT 1', [roleId]);
+      if (usersWithRole.rows.length > 0) {
+        return handleCORS(NextResponse.json({ error: 'Cannot delete role as it is currently assigned to users.' }, { status: 400 }));
+      }
+
+      await query('DELETE FROM roles WHERE id = $1', [roleId]);
+      return handleCORS(NextResponse.json({ success: true }));
+    }
+
+    // --- DASHBOARD STATS ---
+    if (route === '/admin/stats' && method === 'GET') {
+      const user = await authenticateRequest(request);
+      if (!user || (user.role_name !== 'superadmin' && user.role_name !== 'admin')) {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const products = await query('SELECT COUNT(*) FROM products WHERE is_active = true');
+      const quotations = await query('SELECT COUNT(*) FROM quotations');
+      const orders = await query('SELECT COUNT(*) FROM orders');
+      const customers = await query('SELECT COUNT(*) FROM b2b_customers');
+      const pending = await query('SELECT COUNT(*) FROM b2b_customers WHERE status = $1', ['pending']);
+
+      return handleCORS(NextResponse.json({
+        products: parseInt(products.rows[0].count),
+        quotations: parseInt(quotations.rows[0].count),
+        orders: parseInt(orders.rows[0].count),
+        customers: parseInt(customers.rows[0].count),
+        pending_approvals: parseInt(pending.rows[0].count)
+      }));
+    }
+
+    // Get all orders (Admin)
+    if (route === '/admin/orders' && method === 'GET') {
+      const user = await authenticateRequest(request);
+      if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const url = new URL(request.url);
+      const page = parseInt(url.searchParams.get('page') || '1');
+      const limit = parseInt(url.searchParams.get('limit') || '10');
+      const search = url.searchParams.get('search') || '';
+      const offset = (page - 1) * limit;
+
+      let queryText = `
+        SELECT o.*, c.company_name, u.email as user_email
+        FROM orders o
+        LEFT JOIN b2b_customers c ON o.customer_id = c.id
+        LEFT JOIN users u ON c.user_id = u.id
+      `;
+
+      const queryParams = [];
+
+      if (search) {
+        queryText += ` WHERE o.order_number ILIKE $1 OR c.company_name ILIKE $1`;
+        queryParams.push(`%${search}%`);
+      }
+
+      queryText += ` ORDER BY o.created_at DESC LIMIT $${queryParams.length + 1} OFFSET $${queryParams.length + 2}`;
+
+      queryParams.push(limit, offset);
+
+      const result = await query(queryText, queryParams);
+
+      const countResult = await query('SELECT COUNT(*) FROM orders');
+      const total = parseInt(countResult.rows[0].count);
+
+      return handleCORS(NextResponse.json({
+        orders: result.rows,
+        totalPages: Math.ceil(total / limit),
+        currentPage: page
+      }));
+    }
+
+    // Get Order Details (Admin)
+    if (route.startsWith('/admin/orders/') && method === 'GET') {
+      const orderId = route.split('/')[3];
+      // route is /admin/orders/123 -> split leads to ['', 'admin', 'orders', '123']?
+      // No, /admin/orders/123. split('/') -> ["", "admin", "orders", "123"] -> index 3.
+      // Wait, let's verify if route includes leading slash. Yes it does.
+
+      const user = await authenticateRequest(request);
+      if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      if (!orderId || orderId === 'status') {
+        // Skip if it matches other routes like /update-status if we had one, but we use POST below
+      }
+
+      const orderResult = await query(`
+        SELECT o.*, c.company_name, c.email as customer_email, c.phone as customer_phone
+        FROM orders o
+        LEFT JOIN b2b_customers c ON o.customer_id = c.id
+        WHERE o.id = $1
+      `, [orderId]);
+
+      if (orderResult.rows.length === 0) {
+        return handleCORS(NextResponse.json({ error: 'Order not found' }, { status: 404 }));
+      }
+
+      const itemsResult = await query(`
+        SELECT oi.*, p.name as product_name, p.sku, p.images
+        FROM order_items oi
+        LEFT JOIN products p ON oi.product_id = p.id
+        WHERE oi.order_id = $1
+      `, [orderId]);
+
+      return handleCORS(NextResponse.json({
+        ...orderResult.rows[0],
+        items: itemsResult.rows
+      }));
+    }
+
+    // Update Order Status (Admin)
+    if (route === '/admin/orders/update-status' && method === 'POST') {
+      const user = await authenticateRequest(request);
+      if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const { order_id, status } = await request.json();
+
+      if (!['pending', 'approved', 'processing', 'shipped', 'completed', 'cancelled'].includes(status)) {
+        return handleCORS(NextResponse.json({ error: 'Invalid status' }, { status: 400 }));
+      }
+
+      await query('UPDATE orders SET status = $1 WHERE id = $2', [status, order_id]);
+
+      return handleCORS(NextResponse.json({ success: true }));
     }
 
     // Get all customers for quotations
@@ -742,6 +997,43 @@ async function handleRoute(request, { params }) {
       }
 
       return handleCORS(NextResponse.json({ success: true, customer: result.rows[0] }));
+    }
+
+    // Admin Profile Update
+    if (route === '/admin/profile/update' && method === 'POST') {
+      const user = await authenticateRequest(request);
+      if (!user) {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const { name } = await request.json();
+
+      await query('UPDATE users SET name = $1 WHERE id = $2', [name, user.id]);
+
+      return handleCORS(NextResponse.json({ success: true }));
+    }
+
+    // Admin Change Password
+    if (route === '/admin/profile/change-password' && method === 'POST') {
+      const user = await authenticateRequest(request);
+      if (!user) {
+        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
+      }
+
+      const { currentPassword, newPassword } = await request.json();
+
+      // Verify current password
+      const userResult = await query('SELECT password_hash FROM users WHERE id = $1', [user.id]);
+      const valid = await verifyPassword(currentPassword, userResult.rows[0].password_hash);
+
+      if (!valid) {
+        return handleCORS(NextResponse.json({ error: 'Incorrect current password' }, { status: 400 }));
+      }
+
+      const newHash = await hashPassword(newPassword);
+      await query('UPDATE users SET password_hash = $1 WHERE id = $2', [newHash, user.id]);
+
+      return handleCORS(NextResponse.json({ success: true }));
     }
 
     // Create quotation
@@ -960,74 +1252,6 @@ async function handleRoute(request, { params }) {
       return handleCORS(NextResponse.json({ success: true, quotation: result.rows[0] }));
     }
 
-    // Get all orders (admin)
-    if (route === '/admin/orders' && method === 'GET') {
-      const user = await authenticateRequest(request);
-      if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
-        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
-      }
-
-      const url = new URL(request.url);
-      const page = parseInt(url.searchParams.get('page') || '1');
-      const limit = parseInt(url.searchParams.get('limit') || '10');
-      const offset = (page - 1) * limit;
-      const search = url.searchParams.get('search');
-
-      let queryStr = `
-        SELECT o.*, c.company_name, u.email
-        FROM orders o
-        LEFT JOIN b2b_customers c ON o.customer_id = c.id
-        LEFT JOIN users u ON c.user_id = u.id
-        WHERE 1=1
-      `;
-      const params = [];
-      let paramCount = 1;
-
-      if (search) {
-        queryStr += ` AND (o.order_number ILIKE $${paramCount} OR c.company_name ILIKE $${paramCount} OR u.email ILIKE $${paramCount})`;
-        params.push(`%${search}%`);
-        paramCount++;
-      }
-
-      const countQueryStr = `SELECT COUNT(*) FROM (${queryStr}) as total`;
-
-      queryStr += ` ORDER BY o.created_at DESC LIMIT $${paramCount++} OFFSET $${paramCount}`;
-      params.push(limit, offset);
-
-      const [results, countResult] = await Promise.all([
-        query(queryStr, params),
-        query(countQueryStr, params.slice(0, params.length - 2))
-      ]);
-
-      const total = parseInt(countResult.rows[0].count);
-
-      return handleCORS(NextResponse.json({
-        orders: results.rows,
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
-      }));
-    }
-
-    // Update order status
-    if (route.startsWith('/admin/orders/') && method === 'PUT') {
-      const user = await authenticateRequest(request);
-      if (!user || (user.role !== 'superadmin' && user.role !== 'admin')) {
-        return handleCORS(NextResponse.json({ error: 'Unauthorized' }, { status: 401 }));
-      }
-
-      const orderId = path[2];
-      const body = await request.json();
-      const { status } = body;
-
-      const result = await query(
-        'UPDATE orders SET status = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *',
-        [status, orderId]
-      );
-
-      return handleCORS(NextResponse.json(result.rows[0]));
-    }
 
     // Route not found
     return handleCORS(NextResponse.json({ error: `Route ${route} not found` }, { status: 404 }));

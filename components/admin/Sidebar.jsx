@@ -12,11 +12,13 @@ import {
     LayoutList,
     ChevronUp,
     User2,
+    Users as UsersIcon,
     Briefcase,
     FolderOpen,
 } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
+import { useAuth } from '@/components/providers/AuthProvider'
 import {
     Sidebar,
     SidebarContent,
@@ -66,6 +68,11 @@ const data = {
             url: "/admin/customers",
             icon: Building2,
         },
+        {
+            title: "Requests",
+            url: "/admin/requests",
+            icon: User2,
+        },
     ],
     cms: [
         {
@@ -106,10 +113,19 @@ const data = {
             icon: HelpCircle,
         },
     ],
+    superadminOnly: [
+        {
+            title: "Users",
+            url: "/admin/users",
+            icon: UsersIcon,
+        },
+    ],
 }
 
 export function AdminSidebar({ ...props }) {
     const pathname = usePathname()
+    const { user } = useAuth()
+    const isSuperadmin = user?.role === 'superadmin' || user?.role_name === 'superadmin'
 
     return (
         <Sidebar collapsible="icon" {...props}>
@@ -130,6 +146,20 @@ export function AdminSidebar({ ...props }) {
                     <SidebarGroupContent>
                         <SidebarMenu>
                             {data.navMain.map((item) => (
+                                <SidebarMenuItem key={item.title}>
+                                    <SidebarMenuButton
+                                        asChild
+                                        tooltip={item.title}
+                                        isActive={pathname === item.url || pathname.startsWith(item.url + '/')}
+                                    >
+                                        <Link href={item.url}>
+                                            <item.icon />
+                                            <span>{item.title}</span>
+                                        </Link>
+                                    </SidebarMenuButton>
+                                </SidebarMenuItem>
+                            ))}
+                            {isSuperadmin && data.superadminOnly.map((item) => (
                                 <SidebarMenuItem key={item.title}>
                                     <SidebarMenuButton
                                         asChild

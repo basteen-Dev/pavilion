@@ -138,17 +138,23 @@ export default function ProductDetailPage({ productSlug }) {
 
                   <div className="grid grid-cols-2 gap-4">
                     {user?.role === 'b2b_user' ? (
-                      <>
-                        <Button
-                          className="h-16 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-black uppercase tracking-widest text-xs gap-3"
-                          onClick={() => addToCart(product, 1)}
-                        >
-                          <ShoppingCart className="w-4 h-4" /> Add to Order
-                        </Button>
-                        <Button variant="outline" className="h-16 rounded-2xl border-white/20 hover:bg-white/10 text-white font-black uppercase tracking-widest text-xs gap-3">
-                          <MessageCircle className="w-4 h-4" /> Order Notes
-                        </Button>
-                      </>
+                      user.b2b_status === 'approved' ? (
+                        <>
+                          <Button
+                            className="h-16 rounded-2xl bg-red-600 hover:bg-red-700 text-white font-black uppercase tracking-widest text-xs gap-3"
+                            onClick={() => addToCart(product, quantity)}
+                          >
+                            <ShoppingCart className="w-4 h-4" /> Add to Order
+                          </Button>
+                          <Button variant="outline" className="h-16 rounded-2xl border-white/20 hover:bg-white/10 text-white font-black uppercase tracking-widest text-xs gap-3">
+                            <MessageCircle className="w-4 h-4" /> Order Notes
+                          </Button>
+                        </>
+                      ) : (
+                        <div className="col-span-2 text-center p-4 bg-yellow-500/10 rounded-xl border border-yellow-500/20 text-yellow-500 font-bold uppercase tracking-widest text-xs">
+                          Account {user.b2b_status || 'Pending'}
+                        </div>
+                      )
                     ) : (
                       <>
                         <Button className="h-16 rounded-2xl bg-white text-gray-900 hover:bg-gray-100 font-black uppercase tracking-widest text-xs gap-3">
